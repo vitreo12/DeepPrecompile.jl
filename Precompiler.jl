@@ -2,7 +2,7 @@ module Precompiler
 
 using Crayons
 
-export find_invoke_functions
+export find_invoke_functions, precompile_functions, find_and_precompile
 
 #=
 This package does 2 things:
@@ -28,13 +28,47 @@ Things to watch for:
     2) Base.method_instances(Function, (Tuple for args))
 =#
 
-function find_invoke_functions(f, types_tuple)
+function find_and_precompile(f, types_tuple)
+    println(Crayon(foreground = :white), "Running snooping and precompilation on: ", Crayon(foreground = :yellow), "$f", Crayon(foreground = :blue), "$types_tuple")
     println()
-    find_invoke_functions_recursive(f, types_tuple)
+    println(Crayon(foreground = :white), "Snooping...")
+
+    method_dict = find_invoke_functions(f, types_tuple)
+
+    println()
+    println(Crayon(foreground = :white), "Precompiling...")
+    
+    precompile_functions(method_dict)
+    
+    #Reset Crayon to white
+    println(Crayon(foreground = :white))
+end
+
+function precompile_functions(method_dict)
+    for entry in method_dict
+
+        #entry[1] is a GlobalRef. eval everything and treat as Symbols to escape the problem.
+        has_precompiled = eval(:(precompile($(entry[1]), $(entry[2]))))
+
+        if(has_precompiled)
+            println(Crayon(foreground = :white), "Precompiling ", Crayon(foreground = :yellow), "$(entry[1])", Crayon(foreground = :blue), "$(entry[2]) ", Crayon(foreground = :white), "-> ", Crayon(foreground = :green), "Succesfully precompiled")
+        else
+            println(Crayon(foreground = :white), "Precompiling ", Crayon(foreground = :yellow), "$(entry[1])", Crayon(foreground = :blue), "$(entry[2]) ", Crayon(foreground = :white), "-> ", Crayon(foreground = :red), "Failed to precompile")
+        end
+    end
+end
+
+function find_invoke_functions(f, types_tuple)    
+    method_dict = Dict()
+
+    find_invoke_functions_recursive(f, types_tuple, method_dict)
+
+    #Dict that will contain PathToFunction => TupleArguments
+    return method_dict
 end
 
 #Inner types of the Tuple. Recursive search
-function find_unstable_type_recursive(type_to_analyze)
+function find_unstable_type_recursive(type_to_analyze, father_type_vec = nothing, func_name = nothing)
 
     if(isa(type_to_analyze, DataType))
 
@@ -45,7 +79,8 @@ function find_unstable_type_recursive(type_to_analyze)
             if(typeof(type_svec) != Core.SimpleVector)
                 
                 if(!isconcretetype(type_svec))
-                    error("Type $type_svec in $type_to_analyze is not concrete")
+                    println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "Type $type_svec in $type_to_analyze is not concrete")
+                    return
                 end
                 
                 #Go to next element if no errors
@@ -56,110 +91,157 @@ function find_unstable_type_recursive(type_to_analyze)
             for type in type_svec
                 
                 if(!isconcretetype(type))
-                    error("Type $type in $type_to_analyze is not concrete")
+                    println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "Type $type in $type_to_analyze is not concrete")
+                    return
                 end
 
-                find_unstable_type_recursive(type)
+                find_unstable_type_recursive(type, type_svec)
             end
         end
 
-        #If code gets here, it's a normal DataType (not a composed struct). Just check is it is concrete
+        #If code gets here, it's a normal DataType (not a composed struct). Just check if it is concrete
         if(!isconcretetype(type_to_analyze))
-            error("Type $type_to_analyze is not concrete")
+            if(father_type_vec != nothing && func_name != nothing)
+                println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "Type $type_to_analyze in $func_name$father_type_vec is not concrete")
+            elseif(father_type_vec != nothing)
+                println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "Type $type_to_analyze in $father_type_vec is not concrete")
+            else
+                println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "Type $type_to_analyze is not concrete")
+            end
+
+            return
         end
     end
 
     if(isa(type_to_analyze, UnionAll))
-        error("Type $type_to_analyze is not concrete. Perhaps it hasn't been parametrized correctly.")
+        println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "Type $type_to_analyze is not concrete. Perhaps it hasn't been parametrized correctly.")
+        return
     end
 
     if(isa(type_to_analyze, Union))
-        print(Crayon(foreground = :red), "WARNING: $type_to_analyze will generate non-specialized code.")
+        println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "$type_to_analyze will generate non-specialized code.")
 
         #Find inner types in the Union anyway
-        find_unstable_type_recursive(type_to_analyze.a)
-        find_unstable_type_recursive(type_to_analyze.b)
+        find_unstable_type_recursive(type_to_analyze.a, type_to_analyze)
+        find_unstable_type_recursive(type_to_analyze.b, type_to_analyze)
     end
 
 end
 
-#Delve into each "invoke" call
-function find_invoke_functions_recursive(f, types_tuple)
-    
+function find_invoke_functions_recursive(f, types_tuple, method_dict)
+
+    #Print out
+    println(Crayon(foreground = :white), "Snooping ", Crayon(foreground = :yellow), "$f", Crayon(foreground = :blue), "$types_tuple")
+
     #################################
     #Checks for constructor functions
+
     if(isa(f, DataType))
-        if(!f.isconcretetype)
-            error("Type $f is not concrete")
+        
+        #Ignore if analyzed DataType is a subtype of Exception
+        if(f.super != Exception)
+            if(!f.isconcretetype)
+                println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "Type $f is not concrete")
+            end
+
+            for type_of_field in f.types
+                if(isa(type_of_field, Union))
+                    println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "$type_of_field in $f is not concrete.")
+                end
+
+                if(isa(type_of_field, UnionAll))
+                    println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "$type_of_field in $f is not concrete. Perhaps it hasn't been parametrized correctly.")
+                end
+
+                if(!type_of_field.isconcretetype)
+                    println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "Type $type_of_field in $f is not concrete")
+                end
+            end
         end
 
-        for type_of_field in f.types
-            if(isa(type_of_field, Union))
-                error("$type_of_field in $f is not concrete.")
-            end
-
-            if(isa(type_of_field, UnionAll))
-                error("$type_of_field in $f is not concrete. Perhaps it hasn't been parametrized correctly.")
-            end
-
-            if(!type_of_field.isconcretetype)
-                error("Type $type_of_field in $f is not concrete")
-            end
-        end
     end
 
     if(isa(f, Union))
-        error("$f is not concrete.")
+        println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "$f is not concrete.")
     end
 
     if(isa(f, UnionAll))
-        error("Type $f is not concrete. Perhaps it hasn't been parametrized correctly.")
+        println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "Type $f is not concrete. Perhaps it hasn't been parametrized correctly.")
     end
     #################################
 
-    #Types in the tuple
+    #Types in the arguments tuple to function
     for type in types_tuple
-        find_unstable_type_recursive(type)
+        find_unstable_type_recursive(type, types_tuple, f)
     end
 
     #Get the full typed graph for the function
     code_info_typed = code_typed(f, types_tuple)[1].first
 
+    #Cache the top function.
+    setindex!(method_dict, types_tuple, f)
+
+    #Get the code line by line
     code_exprs = code_info_typed.code
 
     #println(code_info_typed)
+    #println("$f, $types_tuple")
 
+    #Parse the typed graph of the function line by line. Eventually go into each invoke call recursively.
     for code_line in code_exprs
         if(isa(code_line, Expr))
+
+            #Invoke calls
             if(code_line.head == :invoke)
                 invoke_call = code_line
                 
                 method_instance = invoke_call.args[1]
-                println(method_instance)
+                #println(method_instance)
 
                 method_instance_name = method_instance.def.name
                 #println(method_instance_name)
+
+                method_instance_definition = invoke_call.args[2]
+                #println(method_instance_definition)
 
                 method_instance_args = method_instance.specTypes.parameters[2:end] #Ignore first one, which is the function name
                 #println(method_instance_args)
 
                 method_instance_args_tuple = tuple(method_instance_args...) #"method_instance_args..." to unpack the svec in all its components
                 #println(method_instance_args_tuple)
+
+                setindex!(method_dict, method_instance_args_tuple, method_instance_definition)
+                #println(method_dict)
                 
                 #eval(:(Main.code_warntype($method_instance_name, $method_instance_args_tuple)))
                 
-                #Some methods are just inner methods that do not have public exposure, so they would give errors here
-                #= try
-                    eval(:(find_invoke_functions_recursive($method_instance_name, $method_instance_args_tuple))) #need to wrap in expr because the "method_instance_name" is a Symbol
-                catch
+                #This will check if the sub invoke calls give type errors. It it does, skip the method entirely.
+                try
+                    eval(:(find_invoke_functions_recursive($method_instance_definition, $method_instance_args_tuple, $method_dict))) #need to wrap in expr because the "method_instance_name" is a Symbol
+                catch exception
+                    println(Crayon(foreground = :red), exception)
                     continue
-                end =#
+                end
 
-                #return
+            elseif(code_line.head == :call)
+                call_call = code_line
+
+                call_instance = call_call.args[1]
+
+                #println(call_instance)
+            
+            #Constructor calls, cache them aswell.
+            elseif(code_line.head == :new)
+                constructor_call = code_line
+                constructor_type = eval(:($(constructor_call.args[1]))) #This is a DataType
+
+                constructor_args = constructor_type.types
+                constructor_args_tuple = tuple(constructor_args...)
+
+                setindex!(method_dict, constructor_args_tuple, constructor_type)
             end
         end
     end
-    println()
 end
 
 end
@@ -167,6 +249,8 @@ end
 
 #TESTING:
 module TypeStabilityTest
+
+export myStruct, test_calc
 
 using ..Precompiler
 
@@ -176,7 +260,6 @@ abstract type AbstractStruct end
 If using a::AbstractFloat, a will always be an AbstractFloat throughout the code, even if it assigned a concrete type.
 Using parametric types, I can make sure to instantiate the EXACT type!!!!!!!!
 =#
-
 struct myStruct{F <: Union{AbstractFloat, Signed}, S <: Union{AbstractFloat, Signed}} <: AbstractStruct
     a::F
     b::S
@@ -203,10 +286,6 @@ function test_calc(input::AbstractStruct)
     return final_val
 end
 
-function hello_there(a::Union{AbstractFloat, Signed})
-    return a * a * a * a
-end
-
 function cubic_interp(a::AbstractFloat, x0::AbstractFloat, x1::AbstractFloat, x2::AbstractFloat, x3::AbstractFloat)
     c0::Float32 = x1
     c1::Float32 = 0.5f0 * (x2 - x0)
@@ -218,8 +297,8 @@ end
 
 function test_warntypes()
 
-    println("\n************** PARAMETRIC TYPE *****************\n")
     #Stable (using parametric types)
+    println("\n************** PARAMETRIC TYPE *****************\n")
     Main.code_warntype(test_calc, (myStruct{Float64, Int64}, ))
 
     #Unstable 
@@ -235,20 +314,58 @@ end
 
 function test_precompiler()
 
+    find_and_precompile(myStruct{Float64, Int64}, (Float64, Int64))
+
+    find_and_precompile(test_calc, (myStruct{Float64, Int64}, ))
+
+    #find_and_precompile(myUnstableStruct, (Float64, Int64))
+
+    #find_invoke_functions(myStruct{Float64, Int64}, (Float64, Int64))
+
     #The resulting fields in myStruct{Float64, Int64} are seen as concrete.
-    find_invoke_functions(test_calc, (myStruct{Float64, Int64}, ))
-
-    find_invoke_functions(myStruct{Float64, Int64}, (Float64, Int64))
-
-    find_invoke_functions(hello_there, (Union{AbstractFloat, Signed},))
-    #Main.code_warntype(hello_there, (Union{AbstractFloat, Signed},))
+    #find_invoke_functions(test_calc, (myStruct{Float64, Int64}, ))
 
     #find_invoke_functions(myUnstableStruct, (Float64, Int64))
 end
 
 #test_warntypes()
-test_precompiler()
+
+#test_precompiler()
 
 end
 
-#a = TypeStabilityTest.test_precompiler()
+#MAIN
+
+function test_precompiler()
+
+    Precompiler.find_and_precompile(TypeStabilityTest.myStruct{Float64, Int64}, (Float64, Int64))
+
+    Precompiler.find_and_precompile(TypeStabilityTest.test_calc, (TypeStabilityTest.myStruct{Float64, Int64}, ))
+
+    Precompiler.find_and_precompile(TypeStabilityTest.myUnstableStruct, (Float64, Int64))
+
+end
+
+function manual_precompiler()
+    precompile(sin, (Float64,))
+    precompile(cos, (Float64,))
+    precompile(tanh, (Float64,))
+
+    #How do i retrieve all these println calls coming form a :call?
+    precompile(println, (Float64,))
+    precompile(println, (Base.TTY, Float64))
+    precompile(Base.print, (Base.TTY, Float64, Char))
+end
+
+test_precompiler()
+#manual_precompiler()
+
+#PROBLEM WITH PRECOMPILER NOW IS THE :call STUFF, which, for exampled is used
+#for println function, which is not getting throughly precompiled.
+
+#I could just print a Warning for untyped methods from Base, Core, etc... To just check on user defined STUFF
+#giving for granted that Julia inner code is type stable.
+
+@time a = 100
+@time b = TypeStabilityTest.myStruct{Float64, Int64}(16.214124, 10)
+@time TypeStabilityTest.test_calc(b)

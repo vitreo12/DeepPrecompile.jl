@@ -47,19 +47,38 @@ end
 function precompile_functions(method_dict)
     for entry in method_dict
 
+        function_name = entry[1][1]
+        tuple_types = entry[1][2]
+
         #entry[1] is a GlobalRef. eval everything and treat as Symbols to escape the problem.
-        has_precompiled = eval(:(precompile($(entry[1]), $(entry[2]))))
+        has_precompiled = eval(:(precompile($function_name, $tuple_types)))
 
         if(has_precompiled)
-            println(Crayon(foreground = :white), "Precompiling ", Crayon(foreground = :yellow), "$(entry[1])", Crayon(foreground = :blue), "$(entry[2]) ", Crayon(foreground = :white), "-> ", Crayon(foreground = :green), "Succesfully precompiled")
+            println(Crayon(foreground = :white), "Precompiling ", Crayon(foreground = :yellow), "$function_name", Crayon(foreground = :blue), "$tuple_types ", Crayon(foreground = :white), "-> ", Crayon(foreground = :green), "Succesfully precompiled")
         else
-            println(Crayon(foreground = :white), "Precompiling ", Crayon(foreground = :yellow), "$(entry[1])", Crayon(foreground = :blue), "$(entry[2]) ", Crayon(foreground = :white), "-> ", Crayon(foreground = :red), "Failed to precompile")
+            println(Crayon(foreground = :white), "Precompiling ", Crayon(foreground = :yellow), "$function_name", Crayon(foreground = :blue), "$tuple_types ", Crayon(foreground = :white), "-> ", Crayon(foreground = :red), "Failed to precompile")
         end
     end
 end
 
+#Returns true if method was added, false if the method was already in the table.
+function add_to_method_dict(method_dict, f, types_tuple)::Bool
+    
+    tuple_fun_and_types = (f, types_tuple)
+    
+    try
+        getindex(method_dict, tuple_fun_and_types)
+        #println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "Function $f$(types_tuple) is already in the method dictionary")
+    catch
+        setindex!(method_dict, tuple_fun_and_types, tuple_fun_and_types)
+        return true
+    end
+
+    return false
+end
+
 function find_invoke_functions(f, types_tuple)    
-    method_dict = Dict()
+    method_dict = Dict{Any, Any}()
 
     find_invoke_functions_recursive(f, types_tuple, method_dict)
 
@@ -179,19 +198,46 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
     code_info_typed = code_typed(f, types_tuple)[1].first
 
     #Cache the top function.
-    setindex!(method_dict, types_tuple, f)
+    method_added = add_to_method_dict(method_dict, f, types_tuple)
+    if(!method_added)
+        return
+    end
 
     #Get the code line by line
-    code_exprs = code_info_typed.code
+    code_line_by_line = code_info_typed.code
 
-    #println(code_info_typed)
+    #Get the ssavaluetypes of the code line by line
+    code_ssavaluetypes = code_info_typed.ssavaluetypes
+    
     #println("$f, $types_tuple")
 
-    #Parse the typed graph of the function line by line. Eventually go into each invoke call recursively.
-    for code_line in code_exprs
-        if(isa(code_line, Expr))
+    #Count the 1 at the beginning of loop to ignore the if/continue stuff that would screw up the counting.
+    line_counter = 0
 
-            #Invoke calls
+    #Parse the typed graph of the function line by line. Eventually go into each invoke call recursively.
+    for code_line in code_line_by_line
+        
+        line_counter = line_counter + 1
+
+        #If it is a Core.PiNode, it needs to be evaluated first. 
+        #Then, its type will be stored at the same position in the code_ssavaluetypes array, substituing the previous one.
+        #This way, the actual evaluated typed value will be retrieved later when dealing with the correct ssavalue
+        if(isa(code_line, Core.PiNode))
+
+            #The eventual error here, if the Core.PiNode.val is a Core.SSAValue (e.g. "π (%12, Float64)") will be catched by the try/cath block...
+            type_of_line = typeof(eval(code_line))
+            code_ssavaluetypes[line_counter] = type_of_line
+            
+            #If the .val of Core.PiNode is a Core.SSAValue, skip it. (e.g. "π (%12, Float64)")
+            #I don't know why this hangs forever:
+            #if(!isa(code_line.val, Core.SSAValue))
+            #    type_of_line = typeof(eval(code_line))
+            #    code_ssavaluetypes[line_counter] = type_of_line
+            #end
+
+        elseif(isa(code_line, Expr))
+            
+            #Invoke calls (:invoke)
             if(code_line.head == :invoke)
                 invoke_call = code_line
                 
@@ -210,7 +256,10 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
                 method_instance_args_tuple = tuple(method_instance_args...) #"method_instance_args..." to unpack the svec in all its components
                 #println(method_instance_args_tuple)
 
-                setindex!(method_dict, method_instance_args_tuple, method_instance_definition)
+                invoke_method_added = add_to_method_dict(method_dict, method_instance_definition, method_instance_args_tuple)
+                if(!invoke_method_added)
+                    continue
+                end
                 #println(method_dict)
                 
                 #eval(:(Main.code_warntype($method_instance_name, $method_instance_args_tuple)))
@@ -219,26 +268,136 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
                 try
                     eval(:(find_invoke_functions_recursive($method_instance_definition, $method_instance_args_tuple, $method_dict))) #need to wrap in expr because the "method_instance_name" is a Symbol
                 catch exception
-                    println(Crayon(foreground = :red), exception)
+
+                    #Ignore the case of the ErrorException("access to invalid SSAValue"). See above on the if(isa(code_line, Core.PiNode)) block why.
+                    if (exception != ErrorException("access to invalid SSAValue"))
+                        println(Crayon(foreground = :red), "EXCEPTION DETECTED for $method_instance_definition: ", Crayon(foreground = :white), exception)
+                    end
+                    
                     continue
                 end
 
+            #Function calls (:call)
             elseif(code_line.head == :call)
-                call_call = code_line
+                call_function_name = code_line.args[1]
 
-                call_instance = call_call.args[1]
+                eval_call_function_name = eval(:($call_function_name))
 
-                #println(call_instance)
-            
-            #Constructor calls, cache them aswell.
+                #println(call_function_name)
+
+                #If it is a Core.IntrinsicFunction or a Core.Builtin function, it's already compiled and no need to do anything with it.
+                if(isa(eval_call_function_name, Core.IntrinsicFunction) || isa(eval_call_function_name, Core.Builtin))
+                    continue
+                end
+
+                #println(call_function_name)
+
+                function_args = code_line.args[2:end]
+
+                call_vec_int_ssavals = Vector{Int64}()
+                
+                #There might be cases where it's not just a ssavalue in the args for the :call, 
+                #but some other things for built-in functions. Like "Base.getfield(%1, :hi)". Ignore such cases.
+                mixed_ssavalue = false
+
+                #Find the SSAValue inside the code for this specific :call
+                for function_arg in function_args
+                    if(isa(function_arg, Core.SSAValue))
+                        append!(call_vec_int_ssavals, function_arg.id)
+                    else
+                        mixed_ssavalue = true
+                    end
+                end
+
+                if(!isempty(call_vec_int_ssavals) && !mixed_ssavalue)
+                    call_vec_types = Vector{Any}(undef, length(call_vec_int_ssavals))
+                    call_counter = 1
+                    
+                    #Retrieve the types of the values in the ssavaluetypes Array through the SSAValue index
+                    for num in call_vec_int_ssavals
+                        call_vec_types[call_counter] = code_ssavaluetypes[num]
+                        call_counter = call_counter + 1
+                    end    
+                    
+                    #Final tuple of arguments
+                    call_tuple_types = tuple(call_vec_types...)
+
+                    #Add to precompile Vector
+                    call_method_added = add_to_method_dict(method_dict, call_function_name, call_tuple_types)
+                    if(!call_method_added)
+                        continue
+                    end
+
+                    #println("$call_function_name, $call_tuple_types")
+                    
+                    #Keep recursively find new stuff
+                    try
+                        eval(:(find_invoke_functions_recursive($call_function_name, $call_tuple_types, $method_dict))) #need to wrap in expr because the "method_instance_name" is a Symbol
+                    catch exception
+                        #Ignore the case of the ErrorException("access to invalid SSAValue"). See above on the if(isa(code_line, Core.PiNode)) block why.
+                        if (exception != ErrorException("access to invalid SSAValue"))
+                            println(Crayon(foreground = :red), "EXCEPTION DETECTED for $method_instance_definition: ", Crayon(foreground = :white), exception)
+                        end
+                        
+                        continue
+                    end
+                end
+
+            #Constructor calls (:new)
             elseif(code_line.head == :new)
                 constructor_call = code_line
                 constructor_type = eval(:($(constructor_call.args[1]))) #This is a DataType
 
-                constructor_args = constructor_type.types
-                constructor_args_tuple = tuple(constructor_args...)
+                typeassert(constructor_type, DataType)
 
-                setindex!(method_dict, constructor_args_tuple, constructor_type)
+                #They most often will be Core.SSAValues, but they can be String if they are prebaked in.
+                constructor_args_code = constructor_call.args[2:end]
+
+                #Actual types of the constructor_type function.
+                constructor_args = constructor_type.types
+
+                #Empty vector to fill if some of the types in constructor_args_code are concrete subtypes of constructor_args
+                constructor_args_new_vec = Vector{Any}(undef, length(constructor_args))
+
+                println(Crayon(foreground = :white), "Snooping ", Crayon(foreground = :yellow), "$constructor_type", Crayon(foreground = :blue), "$(tuple(constructor_args...))")
+
+                constructor_counter = 1
+
+                for type_of_field in constructor_args
+
+                    if(isa(type_of_field, Union))
+                        println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "$type_of_field in $constructor_type is not concrete.")
+
+                    elseif(isa(type_of_field, UnionAll))
+                        println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "$type_of_field in $constructor_type is not concrete. Perhaps it hasn't been parametrized correctly.")
+                    
+                    elseif(!isconcretetype(type_of_field))
+                        println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "Type $type_of_field in $constructor_type is not concrete")
+                    end
+
+                    #First of all, just fill the empty vector with the standard tuple() values for this constructor
+                    constructor_args_new_vec[constructor_counter] = type_of_field
+
+                    #Check if any type in the args to the :new Expr are baked in (mostly, String values)
+                    type_in_constructor_args_code = typeof(constructor_args_code[constructor_counter])
+
+                    #First check if the argument is directly inserted as subtype in the graph (as the case for String(s) in AbstractString(s) functions, check code_typed(rand, (Int64, Int64) and its AssertionError fuction))
+                    if(isconcretetype(type_in_constructor_args_code) && isa(type_of_field, Type) && type_of_field != Any)
+                        if(type_in_constructor_args_code <: type_of_field)
+                            constructor_args_new_vec[constructor_counter] = type_in_constructor_args_code
+                            println(Crayon(foreground = :green), "FOUND ", Crayon(foreground = :white), "$type_in_constructor_args_code as concrete subtype of $type_of_field. Using $type_in_constructor_args_code" )
+                        end
+                    end
+
+                    constructor_counter = constructor_counter + 1
+                end
+
+                constructor_args_tuple = tuple(constructor_args_new_vec...)
+
+                constructor_method_added = add_to_method_dict(method_dict, constructor_type, constructor_args_tuple)
+                if(!constructor_method_added)
+                    continue
+                end
             end
         end
     end
@@ -336,6 +495,8 @@ end
 
 #MAIN
 
+#using Plots
+
 function test_precompiler()
 
     Precompiler.find_and_precompile(TypeStabilityTest.myStruct{Float64, Int64}, (Float64, Int64))
@@ -344,6 +505,13 @@ function test_precompiler()
 
     Precompiler.find_and_precompile(TypeStabilityTest.myUnstableStruct, (Float64, Int64))
 
+    Precompiler.find_and_precompile(rand, (Int64, Int64))
+
+    Precompiler.find_and_precompile(zeros, (Int64,))
+
+    #Precompiler.find_and_precompile(plotly, ())
+
+    #Precompiler.find_and_precompile(plot, (Array{Float64, 2},))
 end
 
 function manual_precompiler()
@@ -369,3 +537,11 @@ test_precompiler()
 @time a = 100
 @time b = TypeStabilityTest.myStruct{Float64, Int64}(16.214124, 10)
 @time TypeStabilityTest.test_calc(b)
+
+@time TypeStabilityTest.myUnstableStruct(16.214124, 10)
+@time rand_vec = rand(5, 10)
+@time rand_vec = zeros(1000)
+
+#plotly()
+
+#plot(rand_vec, linewidth=2, title="My Plot")

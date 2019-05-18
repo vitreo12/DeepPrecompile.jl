@@ -75,7 +75,7 @@ function find_unstable_type_recursive(type_to_analyze, father_type_vec = nothing
             if(typeof(type_svec) != Core.SimpleVector)
                 
                 if(!isconcretetype(type_svec))
-                    println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_svec ", Crayon(foreground = :white), "in ", Crayon(foreground = :yellow), "$type_to_analyze ", Crayon(foreground = :white), "is not concrete.")
+                    println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_svec ", Crayon(foreground = :white), "in ", Crayon(foreground = :yellow), "$type_to_analyze ", Crayon(foreground = :white), "is not concrete.")
                     return
                 end
                 
@@ -87,7 +87,7 @@ function find_unstable_type_recursive(type_to_analyze, father_type_vec = nothing
             for type in type_svec
                 
                 if(!isconcretetype(type))
-                    println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type ", Crayon(foreground = :white), "in ", Crayon(foreground = :yellow), "$type_to_analyze ", Crayon(foreground = :white), "is not concrete.")
+                    println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type ", Crayon(foreground = :white), "in ", Crayon(foreground = :yellow), "$type_to_analyze ", Crayon(foreground = :white), "is not concrete.")
                     return
                 end
 
@@ -98,11 +98,11 @@ function find_unstable_type_recursive(type_to_analyze, father_type_vec = nothing
         #If code gets here, it's a normal DataType (not a composed struct). Just check if it is concrete
         if(!isconcretetype(type_to_analyze))
             if(father_type_vec != nothing && func_name != nothing)
-                println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_to_analyze ", Crayon(foreground = :white), "in ", Crayon(foreground = :yellow), "$func_name", Crayon(foreground = :blue), "$father_type_vec ", Crayon(foreground = :white), "is not concrete.")
+                println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_to_analyze ", Crayon(foreground = :white), "in ", Crayon(foreground = :yellow), "$func_name", Crayon(foreground = :blue), "$father_type_vec ", Crayon(foreground = :white), "is not concrete.")
             elseif(father_type_vec != nothing)
-                pprintln(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_to_analyze ", Crayon(foreground = :white), "in ", Crayon(foreground = :blue), "$father_type_vec ", Crayon(foreground = :white), "is not concrete.")
+                pprintln(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_to_analyze ", Crayon(foreground = :white), "in ", Crayon(foreground = :blue), "$father_type_vec ", Crayon(foreground = :white), "is not concrete.")
             else
-                println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_to_analyze ", Crayon(foreground = :white), "is not concrete.")
+                println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_to_analyze ", Crayon(foreground = :white), "is not concrete.")
             end
 
             return
@@ -110,12 +110,12 @@ function find_unstable_type_recursive(type_to_analyze, father_type_vec = nothing
     end
 
     if(isa(type_to_analyze, UnionAll))
-        println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_to_analyze ", Crayon(foreground = :white), "is not concrete. Perhaps it hasn't been parametrized correctly.")
+        println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_to_analyze ", Crayon(foreground = :white), "is not concrete. Perhaps it hasn't been parametrized correctly.")
         return
     end
 
     if(isa(type_to_analyze, Union))
-        println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :blue), "$type_to_analyze ", Crayon(foreground = :white), "will generate non-specialized code.")
+        println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :blue), "$type_to_analyze ", Crayon(foreground = :white), "will generate non-specialized code.")
 
         #Find inner types in the Union anyway
         find_unstable_type_recursive(type_to_analyze.a, type_to_analyze)
@@ -137,20 +137,20 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
         #Ignore if analyzed DataType is a subtype of Exception
         if(f.super != Exception)
             if(!f.isconcretetype)
-                println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$f", Crayon(foreground = :white), " is not concrete.")
+                println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$f", Crayon(foreground = :white), " is not concrete.")
             end
 
             for type_of_field in f.types
                 if(isa(type_of_field, Union))
-                    println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_of_field ", Crayon(foreground = :white), "in ", Crayon(foreground = :yellow), "$f ", Crayon(foreground = :white), "is not concrete.")
+                    println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_of_field ", Crayon(foreground = :white), "in ", Crayon(foreground = :yellow), "$f ", Crayon(foreground = :white), "is not concrete.")
                 end
 
                 if(isa(type_of_field, UnionAll))
-                    println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_of_field ", Crayon(foreground = :white), "in ", Crayon(foreground = :yellow), "$f ", Crayon(foreground = :white), "is not concrete. Perhaps it hasn't been parametrized correctly.")
+                    println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_of_field ", Crayon(foreground = :white), "in ", Crayon(foreground = :yellow), "$f ", Crayon(foreground = :white), "is not concrete. Perhaps it hasn't been parametrized correctly.")
                 end
 
                 if(!type_of_field.isconcretetype)
-                    println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_of_field ", Crayon(foreground = :white), "in ", Crayon(foreground = :yellow), "$f ", Crayon(foreground = :white), "is not concrete.")
+                    println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$type_of_field ", Crayon(foreground = :white), "in ", Crayon(foreground = :yellow), "$f ", Crayon(foreground = :white), "is not concrete.")
                 end
             end
         end
@@ -158,11 +158,11 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
     end
 
     if(isa(f, Union))
-        println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$f", Crayon(foreground = :white), " is not concrete.")
+        println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$f", Crayon(foreground = :white), " is not concrete.")
     end
 
     if(isa(f, UnionAll))
-        println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$f", Crayon(foreground = :white), " is not concrete. Perhaps it hasn't been parametrized correctly.")
+        println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Type ", Crayon(foreground = :blue), "$f", Crayon(foreground = :white), " is not concrete. Perhaps it hasn't been parametrized correctly.")
     end
     #################################
 
@@ -226,12 +226,19 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
                 #println(method_instance_name)
 
                 method_instance_definition = invoke_call.args[2]
+
+                #If method instance definition is a Core.Slotnumber, and the slotnumber is called "self", it means the invoke function to call has the same name as the top called function.
+                if(isa(method_instance_definition, Core.SlotNumber))
+                    if(code_info_typed.slotnames[method_instance_definition.id] == Symbol("#self#"))
+                        method_instance_definition = f
+                    end
+                end
                 #println(method_instance_definition)
 
                 method_instance_args = method_instance.specTypes.parameters[2:end] #Ignore first one, which is the function name
                 #println(method_instance_args)
 
-                method_instance_args_tuple = tuple(method_instance_args...) #"method_instance_args..." to unpack the svec in all its components
+                method_instance_args_tuple = tuple(method_instance_args...) #svec -> Tuple
                 #println(method_instance_args_tuple)
 
                 #Sometimes the graph might have a Core.SSAValue representing which function to invoke. I need to retrieve it from the graph first. (See code_typed(LinearAlgebra.det(Array{Float64, 2},)))
@@ -239,8 +246,6 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
                     method_instance_definition = code_line_by_line[method_instance_definition.id]
                     #println(method_instance_definition)
                 end
-
-                
 
                 invoke_method_added = add_to_method_dict(method_dict, method_instance_definition, method_instance_args_tuple)
                 if(!invoke_method_added)
@@ -254,22 +259,22 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
                 try
                     eval(:(find_invoke_functions_recursive($method_instance_definition, $method_instance_args_tuple, $method_dict))) #need to wrap in expr because the "method_instance_name" is a Symbol
                 catch exception
-
-                    #Ignore the case of the ErrorException("access to invalid SSAValue"). See above on the if(isa(code_line, Core.PiNode)) block why.
-                    if (exception != ErrorException("access to invalid SSAValue"))
-                        println(Crayon(foreground = :red), "| EXCEPTION DETECTED for $method_instance_definition: ", Crayon(foreground = :white), exception)
-                    end
-                    
+                    println(Crayon(foreground = :red), "| EXCEPTION DETECTED for $method_instance_definition: ", Crayon(foreground = :white), exception) 
                     continue
                 end
 
             #Function calls (:call)
             elseif(code_line.head == :call)
+                
                 call_function_name = code_line.args[1]
 
-                eval_call_function_name = eval(:($call_function_name))
+                #Sometimes the graph might have a Core.SSAValue representing which function to invoke. Retrieve the actual name of the function from the line by line table, using the id of the Core.SSAValue
+                if(isa(call_function_name, Core.SSAValue))
+                    call_function_name = code_line_by_line[call_function_name.id]
+                    #println(call_function_name)
+                end
 
-                #println(call_function_name)
+                eval_call_function_name = eval(:($call_function_name))
 
                 #If it is a Core.IntrinsicFunction or a Core.Builtin function, it's already compiled and no need to do anything with it.
                 if(isa(eval_call_function_name, Core.IntrinsicFunction) || isa(eval_call_function_name, Core.Builtin))
@@ -286,7 +291,7 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
                 #but some other things for built-in functions. Like "Base.getfield(%1, :hi)". Ignore such cases.
                 mixed_ssavalue = false
 
-                #Find the SSAValue inside the code for this specific :call
+                #Find the SSAValues inside the code for this specific :call
                 for function_arg in function_args
                     if(isa(function_arg, Core.SSAValue))
                         append!(call_vec_int_ssavals, function_arg.id)
@@ -320,11 +325,7 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
                     try
                         eval(:(find_invoke_functions_recursive($call_function_name, $call_tuple_types, $method_dict))) #need to wrap in expr because the "method_instance_name" is a Symbol
                     catch exception
-                        #Ignore the case of the ErrorException("access to invalid SSAValue"). See above on the if(isa(code_line, Core.PiNode)) block why.
-                        if (exception != ErrorException("access to invalid SSAValue"))
-                            println(Crayon(foreground = :red), "| EXCEPTION DETECTED for $method_instance_definition: ", Crayon(foreground = :white), exception)
-                        end
-                        
+                        println(Crayon(foreground = :red), "| EXCEPTION DETECTED for $method_instance_definition: ", Crayon(foreground = :white), exception)
                         continue
                     end
                 end
@@ -359,13 +360,13 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
                     for type_of_field in constructor_args
 
                         if(isa(type_of_field, Union))
-                            println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Field ", Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type ",  Crayon(foreground = :white), "is not concrete.")
+                            println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Field ", Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type ",  Crayon(foreground = :white), "is not concrete.")
 
                         elseif(isa(type_of_field, UnionAll))
-                            println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Field ",  Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type ",  Crayon(foreground = :white), "is not concrete. Perhaps it hasn't been parametrized correctly.")
+                            println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Field ",  Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type ",  Crayon(foreground = :white), "is not concrete. Perhaps it hasn't been parametrized correctly.")
                         
                         elseif(!isconcretetype(type_of_field))
-                            println(Crayon(foreground = :red), "| WARNING: ", Crayon(foreground = :white), "Field ", Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type ",  Crayon(foreground = :white), "is not concrete.")
+                            println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Field ", Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type ",  Crayon(foreground = :white), "is not concrete.")
                         end
 
                         #First of all, just fill the empty vector with the standard tuple() values for this constructor

@@ -2,15 +2,15 @@ module Precompiler
 
 using Crayons
 
-export find_and_precompile
+export deep_precompile
 
-function find_and_precompile(f, types_tuple)
+function deep_precompile(f, types_tuple)
     println(Crayon(foreground = :white), "-------------------------------------------------------------------------------")
     println(Crayon(foreground = :white), "| Running snooping and precompilation on: ", Crayon(foreground = :yellow), "$f", Crayon(foreground = :blue), "$types_tuple", Crayon(foreground = :white), "...")
     println(Crayon(foreground = :white), "|")
     println(Crayon(foreground = :white), "| Snooping...")
 
-    method_dict = find_invoke_functions(f, types_tuple)
+    method_dict = find_compilable_methods(f, types_tuple)
 
     println(Crayon(foreground = :white), "|")
     println(Crayon(foreground = :white), "| Precompiling...")
@@ -54,10 +54,10 @@ function add_to_method_dict(method_dict, f, types_tuple)::Bool
     return false
 end
 
-function find_invoke_functions(f, types_tuple)    
+function find_compilable_methods(f, types_tuple)    
     method_dict = Dict{Any, Any}()
 
-    find_invoke_functions_recursive(f, types_tuple, method_dict)
+    find_compilable_methods_recursive(f, types_tuple, method_dict)
 
     #Dict that will contain PathToFunction => TupleArguments
     return method_dict
@@ -124,7 +124,7 @@ function find_unstable_type_recursive(type_to_analyze, father_type_vec = nothing
 
 end
 
-function find_invoke_functions_recursive(f, types_tuple, method_dict)
+function find_compilable_methods_recursive(f, types_tuple, method_dict)
 
     #Print out
     println(Crayon(foreground = :white), "|\n| Snooping ", Crayon(foreground = :yellow), "$f", Crayon(foreground = :blue), "$types_tuple", Crayon(foreground = :white), "...")
@@ -257,7 +257,7 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
                 
                 #This will check if the sub invoke calls give type errors. It it does, skip the method entirely.
                 try
-                    eval(:(find_invoke_functions_recursive($method_instance_definition, $method_instance_args_tuple, $method_dict))) #need to wrap in expr because the "method_instance_name" is a Symbol
+                    eval(:(find_compilable_methods_recursive($method_instance_definition, $method_instance_args_tuple, $method_dict))) #need to wrap in expr because the "method_instance_name" is a Symbol
                 catch exception
                     println(Crayon(foreground = :red), "| EXCEPTION DETECTED for $method_instance_definition: ", Crayon(foreground = :white), exception) 
                     continue
@@ -323,7 +323,7 @@ function find_invoke_functions_recursive(f, types_tuple, method_dict)
                     
                     #Keep recursively find new stuff
                     try
-                        eval(:(find_invoke_functions_recursive($call_function_name, $call_tuple_types, $method_dict))) #need to wrap in expr because the "method_instance_name" is a Symbol
+                        eval(:(find_compilable_methods_recursive($call_function_name, $call_tuple_types, $method_dict))) #need to wrap in expr because the "method_instance_name" is a Symbol
                     catch exception
                         println(Crayon(foreground = :red), "| EXCEPTION DETECTED for $method_instance_definition: ", Crayon(foreground = :white), exception)
                         continue
@@ -473,18 +473,18 @@ end
 
 function test_precompiler()
 
-    find_and_precompile(myStruct{Float64, Int64}, (Float64, Int64))
+    deep_precompile(myStruct{Float64, Int64}, (Float64, Int64))
 
-    find_and_precompile(test_calc, (myStruct{Float64, Int64}, ))
+    deep_precompile(test_calc, (myStruct{Float64, Int64}, ))
 
-    #find_and_precompile(myUnstableStruct, (Float64, Int64))
+    #deep_precompile(myUnstableStruct, (Float64, Int64))
 
-    #find_invoke_functions(myStruct{Float64, Int64}, (Float64, Int64))
+    #find_compilable_methods(myStruct{Float64, Int64}, (Float64, Int64))
 
     #The resulting fields in myStruct{Float64, Int64} are seen as concrete.
-    #find_invoke_functions(test_calc, (myStruct{Float64, Int64}, ))
+    #find_compilable_methods(test_calc, (myStruct{Float64, Int64}, ))
 
-    #find_invoke_functions(myUnstableStruct, (Float64, Int64))
+    #find_compilable_methods(myUnstableStruct, (Float64, Int64))
 end
 
 #test_warntypes()
@@ -518,7 +518,7 @@ end
 
 
 function test_precompiler()
-    Precompiler.find_and_precompile(func_with_everything, ())
+    Precompiler.deep_precompile(func_with_everything, ())
 end
 
 test_precompiler()

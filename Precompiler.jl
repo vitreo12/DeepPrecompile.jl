@@ -2,39 +2,126 @@ module Precompiler
 
 using Crayons
 
-export deep_precompile
+using InteractiveUtils
 
-function deep_precompile(f, types_tuple)
+export @deep_precompile, @deep_precompile_list, deep_precompile, deep_precompile_list
+
+#Using InteractiveUtils.gen_call_with_extracted_types_and_kwargs to turn the args into arg types, as used in @code_typed, etc...
+macro deep_precompile(ex0...)
+    InteractiveUtils.gen_call_with_extracted_types_and_kwargs(__module__, :deep_precompile, ex0)
+end
+
+macro deep_precompile_list(ex0...)
+    InteractiveUtils.gen_call_with_extracted_types_and_kwargs(__module__, :deep_precompile_list, ex0)
+end
+
+function deep_precompile(f, types_tuple) 
+    #Check if f is a valid callable function/constructor.
+    #methods will already throw an error if the function is not defined.
+    method_list = methods(f).ms 
+    if(length(method_list) < 1)
+        error("Function $f has no callable methods.")
+    end
+
+     #Unpack args if using @deep_precompile, which returns a Tuple{ArgType,...}, which is not an instantiated Tuple, but a dispatched tuple.
+     if(!isa(types_tuple, Tuple))
+        if(typeof(types_tuple) == DataType && types_tuple.isdispatchtuple) #args from the macro version
+            types_tuple = tuple(types_tuple.parameters...) #Unpack the parametric Tuple into a instantiated Tuple(). Tuple{Int64, Float64} -> (Int64, Float64)
+        else
+            error("Invalid argument: $types_tuple")
+        end
+    end
+
     println(Crayon(foreground = :white), "-------------------------------------------------------------------------------")
     println(Crayon(foreground = :white), "| Running snooping and precompilation on: ", Crayon(foreground = :yellow), "$f", Crayon(foreground = :blue), "$types_tuple", Crayon(foreground = :white), "...")
     println(Crayon(foreground = :white), "|")
     println(Crayon(foreground = :white), "| Snooping...")
 
+    #Dict with all methods/tuple of types pairs
     method_dict = find_compilable_methods(f, types_tuple)
+ 
+    #Vector of precompile Exprs. 
+    precompile_list = generate_precompile_list(method_dict)
 
     println(Crayon(foreground = :white), "|")
     println(Crayon(foreground = :white), "| Precompiling...")
+
+    #Actual precompilation of all the methods
+    precompile_methods(method_dict, precompile_list)
     
-    precompile_functions(method_dict)
-    
-    #Also reset Crayon to white
+    #Reset Crayon to white
     println(Crayon(foreground = :white), "-------------------------------------------------------------------------------")
 end
 
-function precompile_functions(method_dict)
-    for entry in method_dict
+#Just return the precompile_list as a Vector{Expr}
+function deep_precompile_list(f, types_tuple)
+    #Check if f is a valid callable function/constructor.
+    #methods will already throw an error if the function is not defined.
+    method_list = methods(f).ms 
+    if(length(method_list) < 1)
+        error("Function $f has no callable methods.")
+    end
 
+    #Unpack args if using @deep_precompile, which returns a Tuple{ArgType,...}, which is not an instantiated Tuple, but a dispatched tuple.
+    if(!isa(types_tuple, Tuple))
+        if(typeof(types_tuple) == DataType && types_tuple.isdispatchtuple) #args from the macro version
+            types_tuple = tuple(types_tuple.parameters...) #Unpack the parametric Tuple into a instantiated Tuple(). Tuple{Int64, Float64} -> (Int64, Float64)
+        else
+            error("Invalid argument: $types_tuple")
+        end
+    end
+    
+    println(Crayon(foreground = :white), "-------------------------------------------------------------------------------")
+    println(Crayon(foreground = :white), "| Running snooping and precompilation on: ", Crayon(foreground = :yellow), "$f", Crayon(foreground = :blue), "$types_tuple", Crayon(foreground = :white), "...")
+    println(Crayon(foreground = :white), "|")
+    println(Crayon(foreground = :white), "| Snooping...")
+
+    #Dict with all methods/tuple of types pairs
+    method_dict = find_compilable_methods(f, types_tuple)
+    
+    #Vector of precompile Exprs. Separated from the actual precompilation in order to be also used in PackageCompiler.jl
+    precompile_list = generate_precompile_list(method_dict)
+
+    println(Crayon(foreground = :white))
+    
+    #Only return the precompile_list of Exprs
+    return precompile_list
+end
+
+function generate_precompile_list(method_dict)
+    precompile_list = Vector{Expr}(undef, length(method_dict))
+
+    counter = 1
+    for entry in method_dict
         function_name = entry[1][1]
         tuple_types = entry[1][2]
 
-        #entry[1] is a GlobalRef. eval everything and treat as Symbols to escape the problem.
-        has_precompiled = eval(:(precompile($function_name, $tuple_types)))
+        precompile_list[counter] = :(precompile($function_name, $tuple_types))
+
+        counter = counter + 1
+    end
+
+    return precompile_list
+end
+
+function precompile_methods(method_dict, precompile_list)
+    counter = 1
+    for entry in method_dict
+        precompile_expr = precompile_list[counter]
+        typeassert(precompile_expr, Expr)
+
+        has_precompiled = eval(precompile_expr)
+
+        function_name = entry[1][1]
+        tuple_types = entry[1][2]
 
         if(has_precompiled)
             println(Crayon(foreground = :white), "| Precompiling ", Crayon(foreground = :yellow), "$function_name", Crayon(foreground = :blue), "$tuple_types ", Crayon(foreground = :white), "-> ", Crayon(foreground = :green), "Succesfully precompiled.")
         else
             println(Crayon(foreground = :white), "| Precompiling ", Crayon(foreground = :yellow), "$function_name", Crayon(foreground = :blue), "$tuple_types ", Crayon(foreground = :white), "-> ", Crayon(foreground = :red), "Failed to precompile.")
         end
+
+        counter = counter + 1
     end
 end
 

@@ -1,0 +1,8 @@
+name = "DeepPrecompile"
+uuid = "f2550a5e-7bd4-11e9-0ea0-f79eadc31212"
+authors = ["Francesco Cameli <francesco.cameli95@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+Crayons = "a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f"
+InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"

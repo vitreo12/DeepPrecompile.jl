@@ -1,4 +1,9 @@
+#TESTING:
 module TypeStabilityTest
+
+export myStruct, test_calc
+
+using DeepPrecompile
 
 abstract type AbstractStruct end
 
@@ -6,15 +11,14 @@ abstract type AbstractStruct end
 If using a::AbstractFloat, a will always be an AbstractFloat throughout the code, even if it assigned a concrete type.
 Using parametric types, I can make sure to instantiate the EXACT type!!!!!!!!
 =#
-
 struct myStruct{F <: Union{AbstractFloat, Signed}, S <: Union{AbstractFloat, Signed}} <: AbstractStruct
     a::F
     b::S
 end
 
 struct myUnstableStruct <: AbstractStruct
-    a::Union{AbstractFloat, Signed}
-    b::Union{AbstractFloat, Signed}
+    a::AbstractFloat
+    b::Signed
 end
 
 function hello(a::AbstractFloat)
@@ -44,8 +48,8 @@ end
 
 function test_warntypes()
 
-    println("\n************** PARAMETRIC TYPE *****************\n")
     #Stable (using parametric types)
+    println("\n************** PARAMETRIC TYPE *****************\n")
     Main.code_warntype(test_calc, (myStruct{Float64, Int64}, ))
 
     #Unstable 
@@ -56,8 +60,58 @@ function test_warntypes()
     #Stable
     println("\n************** PARAMETRIC FUNCTION *****************\n")
     Main.code_warntype(cubic_interp, (Float32, Float64, Float16, Float32, Float64))
-end
-
-test_warntypes()
 
 end
+
+function test_DeepPrecompile()
+
+    deep_precompile(myStruct{Float64, Int64}, (Float64, Int64))
+
+    deep_precompile(test_calc, (myStruct{Float64, Int64}, ))
+
+    #deep_precompile(myUnstableStruct, (Float64, Int64))
+
+    #find_compilable_methods(myStruct{Float64, Int64}, (Float64, Int64))
+
+    #The resulting fields in myStruct{Float64, Int64} are seen as concrete.
+    #find_compilable_methods(test_calc, (myStruct{Float64, Int64}, ))
+
+    #find_compilable_methods(myUnstableStruct, (Float64, Int64))
+end
+
+#test_warntypes()
+
+#test_DeepPrecompile()
+
+end
+
+
+using LinearAlgebra
+
+using Crayons
+
+function func_with_everything()
+    
+    b = TypeStabilityTest.myStruct{Float64, Int64}(16.214124, 10)
+    c = TypeStabilityTest.test_calc(b)
+
+    t = TypeStabilityTest.myUnstableStruct(16.214124, 10)
+    g = rand_vec = rand(10, 10)
+    h = det(rand_vec)
+    k = zeros_vec = zeros(1000)
+
+    println(Crayon(foreground = :green), "CRAYON ", Crayon(foreground = :white))
+
+    return c
+end
+
+
+function test_DeepPrecompile()
+    DeepPrecompile.deep_precompile(func_with_everything, ())
+end
+
+test_DeepPrecompile()
+
+@time func_with_everything()
+
+@time func_with_everything()

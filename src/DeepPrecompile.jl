@@ -217,6 +217,71 @@ function find_unstable_type_recursive(type_to_analyze, father_type_vec = nothing
 
 end
 
+function retrieve_function_name_ssavalue(function_name_input, code_line_by_line)
+    typeassert(function_name_input, Core.SSAValue)
+
+    correct_function_name = code_line_by_line[function_name_input.id]
+    #println(correct_function_name)
+    return correct_function_name
+end
+
+function retrieve_function_name_slotnumber(function_name_input, f, types_tuple, code_info_typed)
+    typeassert(function_name_input, Core.SlotNumber)
+
+    correct_function_name = function_name_input
+
+    if(code_info_typed.slotnames[correct_function_name.id] == Symbol("#self#")) #If the slotname is called "self", it means the invoke function to call has the same name as the top called function.
+        correct_function_name = f
+    else #Else, it means that it is invoking a function passed in as argument to the top function. Retrieve that name from the args of the top function. (code.slotnames contains "self" as first element, then the symbol name of the args to the called function.)
+        scaled_id = correct_function_name.id - 1 #-1 to exclude the Symbol("#self")
+        correct_function_name = types_tuple[scaled_id] #Retrieve the arg type from the args tuple...
+    end
+
+    return correct_function_name
+end
+
+function retrieve_function_name_expr(function_name_input)
+    typeassert(function_name_input, Expr)
+
+    correct_function_name = function_name_input.args[1]
+    #println(method_correct_function_name)
+    return correct_function_name
+end
+
+function retrieve_function_name(function_name_input, f, types_tuple, code_info_typed, code_line_by_line)
+    #correct_function_name should be a correct named function. Sometimes the AST representation calls functions from other parts of the code with SSAValues, SlotNumbers or Exprs. Attempt to retrieve the correct naming.
+    correct_function_name = function_name_input 
+
+    counter = 0
+
+    while(true)
+        #Breaking condition: function_name_input is not a SSAValue, SlotNumber or an Expr
+        breaking_condition = !((isa(correct_function_name, Core.SSAValue)) || (isa(correct_function_name, Core.SlotNumber)) || (isa(correct_function_name, Expr)))
+
+        if(breaking_condition)
+            break
+        end
+
+        #Sometimes the graph might have a Core.SSAValue representing which function to invoke. Retrieve the actual name of the function from the line by line table, using the id of the Core.SSAValue
+        if(isa(correct_function_name, Core.SSAValue))
+            correct_function_name = retrieve_function_name_ssavalue(correct_function_name, code_line_by_line)
+        #Sometimes the graph might have a Core.SlotNumber representing the name of the function to be retrieved from the slotnames of the function.
+        elseif(isa(correct_function_name, Core.SlotNumber))
+            correct_function_name = retrieve_function_name_slotnumber(correct_function_name, f, types_tuple, code_info_typed)
+        #Sometimes the graph might have an Expr to be called as the name of the function.
+        elseif(isa(correct_function_name, Expr))
+            correct_function_name = retrieve_function_name_expr(correct_function_name)
+        end
+
+        counter = counter + 1
+        if(counter > 100000) #It's been spinning for too long...
+            error("Unable to lookup correct function_name for $function_name_input")
+        end
+    end
+
+    return correct_function_name
+end
+
 function find_compilable_methods_recursive(f, types_tuple, method_dict)
 
     #Print out
@@ -323,38 +388,16 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                 method_instance_name = method_instance.def.name
                 #println(method_instance_name)
 
-                method_instance_definition = invoke_call.args[2]
-                #println(method_instance_definition)
+                #This one contains all the Module path for the function name. (E.g. "Core.Expr" instead of just "Expr")
+                method_instance_full_name = invoke_call.args[2]
+                #println(method_instance_full_name)
 
-                #Sometimes the graph might have a Core.SSAValue representing which function to invoke. Retrieve the actual name of the function from the line by line table, using the id of the Core.SSAValue
-                if(isa(method_instance_definition, Core.SSAValue))
-                    method_instance_definition = code_line_by_line[method_instance_definition.id]
-                    #println(method_instance_definition)
-                end
+                method_instance_full_name = retrieve_function_name(method_instance_full_name, f, types_tuple, code_info_typed, code_line_by_line)
 
-                #If method instance definition is a Core.Slotnumber
-                if(isa(method_instance_definition, Core.SlotNumber))
-                    if(code_info_typed.slotnames[method_instance_definition.id] == Symbol("#self#")) #If the slotnumber is called "self", it means the invoke function to call has the same name as the top called function.
-                        method_instance_definition = f
-                    else #Else, it means that it is invoking a function passed in as argument to the top function. Retrieve that name from the args of the top function. (code.slotnames contains "self" as first element, then the symbol name of the args to the called function.)
-                        scaled_id = method_instance_definition.id - 1 #-1 to exclude the Symbol("#self")
-                        method_instance_definition = types_tuple[scaled_id] #Retrieve the arg type from the args tuple...
-                    end
-                end
-                
-                #If method_instance_definition points to an Expr, recursively find only the name of the function.
-                if(isa(method_instance_definition, Expr))
-                    while(true)
-                        method_instance_definition = method_instance_definition.args[1]
-                        #println(method_instance_definition)
-                        if(!isa(method_instance_definition, Expr))
-                            break
-                        end
-                    end
-                end
+                #Should I eval method_instance_full_name here, linke in :call and :new?
 
                 #If it is a Core.IntrinsicFunction or a Core.Builtin function, it's already compiled and no need to do anything with it.
-                if(isa(method_instance_definition, Core.IntrinsicFunction) || isa(method_instance_definition, Core.Builtin))
+                if(isa(method_instance_full_name, Core.IntrinsicFunction) || isa(method_instance_full_name, Core.Builtin))
                     continue
                 end
                 
@@ -364,13 +407,7 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                 method_instance_args_tuple = tuple(method_instance_args...) #svec -> Tuple
                 #println(method_instance_args_tuple)
 
-                #Sometimes the graph might have a Core.SSAValue representing which function to invoke. I need to retrieve it from the graph first. (See code_typed(LinearAlgebra.det(Array{Float64, 2},)))
-                #= if(isa(method_instance_definition, Core.SSAValue))
-                    method_instance_definition = code_line_by_line[method_instance_definition.id]
-                    #println(method_instance_definition)
-                end =#
-
-                invoke_method_added = add_to_method_dict(method_dict, method_instance_definition, method_instance_args_tuple)
+                invoke_method_added = add_to_method_dict(method_dict, method_instance_full_name, method_instance_args_tuple)
                 if(!invoke_method_added)
                     continue
                 end
@@ -380,10 +417,11 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                 
                 #This will check if the sub invoke calls give type errors. It it does, skip the method entirely.
                 try
-                    eval(:(find_compilable_methods_recursive($method_instance_definition, $method_instance_args_tuple, $method_dict))) #need to wrap in expr because the "method_instance_name" is a Symbol
+                    eval(:(find_compilable_methods_recursive($method_instance_full_name, $method_instance_args_tuple, $method_dict))) #need to wrap in expr because the "method_instance_name" is a Symbol
                 catch exception
-                    println(Crayon(foreground = :red), "| EXCEPTION DETECTED for $method_instance_definition: ", Crayon(foreground = :white), exception) 
+                    println(Crayon(foreground = :red), "| EXCEPTION DETECTED for $method_instance_full_name: ", Crayon(foreground = :white), exception) 
                     
+                    #Should I just ignore this case?
                     #= if(typeof(exception) != UndefVarError)
                         throw(exception)
                     end =#
@@ -401,34 +439,9 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
 
                 call_function_name = code_line.args[1]
 
-                #Sometimes the graph might have a Core.SSAValue representing which function to invoke. Retrieve the actual name of the function from the line by line table, using the id of the Core.SSAValue
-                if(isa(call_function_name, Core.SSAValue))
-                    call_function_name = code_line_by_line[call_function_name.id]
-                    #println(call_function_name)
-                end
+                call_function_name = retrieve_function_name(call_function_name, f, types_tuple, code_info_typed, code_line_by_line)
 
-                #If the callinf name function is a Core.Slotnumber
-                if(isa(call_function_name, Core.SlotNumber))
-                    if(code_info_typed.slotnames[call_function_name.id] == Symbol("#self#")) #If the slotnumber is called "self", it means the invoke function to call has the same name as the top called function.
-                        call_function_name = f
-                    else #Else, it means that it is invoking a function passed in as argument to the top function. Retrieve that name from the args of the top function. (code.slotnames contains "self" as first element, then the symbol name of the args to the called function.)
-                        scaled_id = call_function_name.id - 1 #-1 to exclude the Symbol("#self")
-                        call_function_name = types_tuple[scaled_id] #Retrieve the arg type from the args tuple...
-                        #println(call_function_name)
-                    end
-                end
-
-                #If call_function_name points to an Expr, recursively find only the name of the function.
-                if(isa(call_function_name, Expr))
-                    while(true)
-                        call_function_name = call_function_name.args[1]
-                        #println(call_function_name)
-                        if(!isa(call_function_name, Expr))
-                            break
-                        end
-                    end
-                end
-
+                #Evaluate to get correct full naming. (E.g. "Core.Expr" instead of just "Expr")
                 eval_call_function_name = eval(:($call_function_name))
 
                 #If it is a Core.IntrinsicFunction or a Core.Builtin function, it's already compiled and no need to do anything with it.
@@ -443,7 +456,8 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                 call_vec_int_ssavals = Vector{Int64}()
                 
                 #There might be cases where it's not just a ssavalue in the args for the :call, 
-                #but some other things for built-in functions. Like "Base.getfield(%1, :hi)". Ignore such cases... This needs much better checking!
+                #but some other things for built-in functions. Like "Base.getfield(%1, :hi)". Ignore such cases.
+                #THIS SHOULD BE BETTER REWORKED!!!!!!!!!!!!
                 mixed_ssavalue = false
 
                 #Find the SSAValues inside the code for this specific :call
@@ -482,6 +496,7 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                     catch exception
                         println(Crayon(foreground = :red), "| EXCEPTION DETECTED for $call_function_name: ", Crayon(foreground = :white), exception)
                         
+                        #Should I just ignore this case?
                         #= if(typeof(exception) != UndefVarError)
                             throw(exception)
                         end =#
@@ -499,37 +514,26 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
             elseif(code_line.head == :new)
                 constructor_call = code_line
 
-                constructor_type = constructor_call.args[1]
+                constructor_type_name = constructor_call.args[1]
                 
-                if(isa(constructor_type, Core.SSAValue))
-                    constructor_type = code_line_by_line[constructor_type.id]
-                end
-
-                #If call_function_name points to an Expr, recursively find only the name of the function.
-                if(isa(constructor_type, Expr))
-                    while(true)
-                        constructor_type = constructor_type.args[1]
-                        #println(call_function_name)
-                        if(!isa(constructor_type, Expr))
-                            break
-                        end
-                    end
-                end
-
-                constructor_type = eval(:($(constructor_type)))
+                #To be honest, constructor_type_name could only be a Core.SSAValue or an Expr. Nevertheless, run the same function.
+                constructor_type_name = retrieve_function_name(constructor_type_name, f, types_tuple, code_info_typed, code_line_by_line)
+                
+                #Evaluate to get correct full naming. (E.g. "Core.Expr" instead of just "Expr")
+                constructor_type_name = eval(:($(constructor_type_name)))
 
                 #If it is a Core.IntrinsicFunction or a Core.Builtin function, it's already compiled and no need to do anything with it.
-                if(isa(constructor_type, Core.IntrinsicFunction) || isa(constructor_type, Core.Builtin))
+                if(isa(constructor_type_name, Core.IntrinsicFunction) || isa(constructor_type_name, Core.Builtin))
                     continue
                 end
 
-                #Actual types of the fields of constructor_type 
-                constructor_args = constructor_type.types
+                #Actual types of the fields of constructor_type_name 
+                constructor_args = constructor_type_name.types
 
                 #Eventual "baked in" stuff. Like literal Strings, etc. It mostly will contain Core.SSAValues, or references to variables.
                 constructor_args_code = constructor_call.args[2:end]
 
-                println(Crayon(foreground = :white), "|\n| Snooping constructor of ", Crayon(foreground = :yellow), "$constructor_type", Crayon(foreground = :blue), "$(tuple(constructor_args...))", Crayon(foreground = :white), "...")
+                println(Crayon(foreground = :white), "|\n| Snooping constructor of ", Crayon(foreground = :yellow), "$constructor_type_name", Crayon(foreground = :blue), "$(tuple(constructor_args...))", Crayon(foreground = :white), "...")
 
                 #Empty vector to fill if some of the types in constructor_args_code are concrete subtypes of constructor_args
                 constructor_args_new_vec = Vector{Any}(undef, length(constructor_args))
@@ -537,20 +541,20 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                 #Special case for one field with AbstractString, precompile for String. It's the case for most ErrorException(), OverflowError... etc...
                 if(length(constructor_args) == 1 && eval(constructor_args[1]) == AbstractString)
                     constructor_args_new_vec[1] = String
-                    println(Crayon(foreground = :green), "| FOUND ", Crayon(foreground = :blue), "AbstractString ", Crayon(foreground = :white), "as only argument to ", Crayon(foreground = :yellow),  "$constructor_type", Crayon(foreground = :white),  "'s constructor. Using concrete Type ", Crayon(foreground = :blue), "String", Crayon(foreground = :white), ".")
+                    println(Crayon(foreground = :green), "| FOUND ", Crayon(foreground = :blue), "AbstractString ", Crayon(foreground = :white), "as only argument to ", Crayon(foreground = :yellow),  "$constructor_type_name", Crayon(foreground = :white),  "'s constructor. Using concrete Type ", Crayon(foreground = :blue), "String", Crayon(foreground = :white), ".")
                 else
                     constructor_counter = 1
 
                     for type_of_field in constructor_args
 
                         if(isa(type_of_field, Union))
-                            println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Field ", Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type ",  Crayon(foreground = :white), "is not concrete.")
+                            println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Field ", Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type_name ",  Crayon(foreground = :white), "is not concrete.")
 
                         elseif(isa(type_of_field, UnionAll))
-                            println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Field ",  Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type ",  Crayon(foreground = :white), "is not concrete. Perhaps it hasn't been parametrized correctly.")
+                            println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Field ",  Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type_name ",  Crayon(foreground = :white), "is not concrete. Perhaps it hasn't been parametrized correctly.")
                         
                         elseif(!isconcretetype(type_of_field))
-                            println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Field ", Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type ",  Crayon(foreground = :white), "is not concrete.")
+                            println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Field ", Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type_name ",  Crayon(foreground = :white), "is not concrete.")
                         end
 
                         #First of all, just fill the empty vector with the standard tuple() values for this constructor
@@ -577,9 +581,9 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
 
                 constructor_args_tuple = tuple(constructor_args_new_vec...)
 
-                #println("$constructor_type, $constructor_args_tuple")
+                #println("$constructor_type_name, $constructor_args_tuple")
 
-                constructor_method_added = add_to_method_dict(method_dict, constructor_type, constructor_args_tuple) 
+                constructor_method_added = add_to_method_dict(method_dict, constructor_type_name, constructor_args_tuple) 
                 if(!constructor_method_added)
                     continue
                 end

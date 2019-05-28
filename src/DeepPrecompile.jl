@@ -510,7 +510,7 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                     end
                 end
 
-            #Constructor calls (:new)
+            #Inner constructor calls (:new)
             elseif(code_line.head == :new)
                 constructor_call = code_line
 
@@ -535,6 +535,36 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
 
                 println(Crayon(foreground = :white), "|\n| Snooping constructor of ", Crayon(foreground = :yellow), "$constructor_type_name", Crayon(foreground = :blue), "$(tuple(constructor_args...))", Crayon(foreground = :white), "...")
 
+                #If the constructor is invalid (for example, if no constructor with the direct types of the struct is defined), skip the iteration...
+                #REVIEW THIS:
+                #= EXAMPLE:
+                struct F
+                    a::Int64
+                    b::Float64
+
+                    function F()
+                    return new(0, 0.0)
+                    end
+
+                    function F(a::Int64)
+                    return new(a, Float64(a))
+                    end
+                    end
+
+                    @code_typed F()
+                    DeepPrecompile.@deep_precompile F()
+
+                    @code_typed F(1)
+                    DeepPrecompile.@deep_precompile F(1)
+
+                    #Does not exist...
+                    @code_typed F(1, 2.0)
+                    DeepPrecompile.@deep_precompile F(1, 2.0)
+                =#
+                #println(code_info_typed)
+                #println(constructor_args)
+                #println(constructor_args_code)
+
                 #Empty vector to fill if some of the types in constructor_args_code are concrete subtypes of constructor_args
                 constructor_args_new_vec = Vector{Any}(undef, length(constructor_args))
 
@@ -557,13 +587,15 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                             println(Crayon(foreground = :magenta), "| WARNING: ", Crayon(foreground = :white), "Field ", Crayon(foreground = :blue), "$type_of_field ",  Crayon(foreground = :white), "in ",  Crayon(foreground = :yellow), "$constructor_type_name ",  Crayon(foreground = :white), "is not concrete.")
                         end
 
-                        #First of all, just fill the empty vector with the standard tuple() values for this constructor
+                        #Fill the empty vector with the standard tuple() values of the types of the struct type being constructed
                         constructor_args_new_vec[constructor_counter] = type_of_field
 
-                        #First, check if there actually is stuff to look for. If length is 0, nothing is baked in.
-                        if(length(constructor_args_code) > 1)
+                        #THIS SECTION IS PROBABLY USELESS, as most of the cases are covered by the one arguments AbstractString functions that are already dealt with previously 
+                        #Check if any type in the args to the :new Expr are baked in directly. This mostly happen for String values, directly inserted as "I am a string" to the args of the Expr.
+                        #Also, check the counter against the length of constructor_args, as the function called might be a constructor function with different number of arguments than the actual fields of the struct. (ANALYZE THIS BETTER BY removing the second conditional and run: "using LinearAlgebra; deep_precompile(Tridiagonal, (Array{Float64, 1}, Array{Float64, 1}, Array{Float64, 1}, Array{Float64, 1}))")
+                        if((length(constructor_args_code) > 1) && (constructor_counter < length(constructor_args)))
 
-                            #Check if any type in the args to the :new Expr are baked in (mostly, String values)
+                            #Check if any type in the args to the :new Expr are baked in in (mostly, String values)
                             type_in_constructor_args_code = typeof(constructor_args_code[constructor_counter])
 
                             #First check if the argument is directly inserted as subtype in the graph (as the case for String(s) in AbstractString(s) functions, check code_typed(rand, (Int64, Int64) and its AssertionError fuction))

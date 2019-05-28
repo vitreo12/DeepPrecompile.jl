@@ -428,7 +428,7 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
 
                     #If finding a TypeError exception, remove the function entirely
                     if(typeof(exception) == TypeError)
-                        remove_from_method_dict(method_dict, call_function_name, call_tuple_types)
+                        #remove_from_method_dict(method_dict, call_function_name, call_tuple_types)
                     end
 
                     continue
@@ -503,7 +503,7 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                         
                         #If finding a TypeError exception, remove the function entirely
                         if(typeof(exception) == TypeError)
-                            remove_from_method_dict(method_dict, call_function_name, call_tuple_types)
+                            #remove_from_method_dict(method_dict, call_function_name, call_tuple_types)
                         end
 
                         continue

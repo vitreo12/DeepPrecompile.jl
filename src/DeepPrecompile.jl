@@ -404,6 +404,16 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                 method_instance_args = method_instance.specTypes.parameters[2:end] #Ignore first one, which is the function name
                 #println(method_instance_args)
 
+                #Detect Core.Compiler.Const(.......) and replace with just Core.Compiler.Const
+                method_instance_type_counter = 1
+                for method_instance_type in method_instance_args
+                    method_instance_type_convert_to_string = String(Symbol(method_instance_type))
+                    if(startswith(method_instance_type_convert_to_string, "Core.Compiler.Const"))
+                        method_instance_args[method_instance_type_counter] = eval(Core.Compiler.Const)
+                    end
+                    method_instance_type_counter += 1
+                end
+
                 method_instance_args_tuple = tuple(method_instance_args...) #svec -> Tuple
                 #println(method_instance_args_tuple)
 
@@ -428,7 +438,7 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
 
                     #If finding a TypeError exception, remove the function entirely
                     if(typeof(exception) == TypeError)
-                        #remove_from_method_dict(method_dict, call_function_name, call_tuple_types)
+                        remove_from_method_dict(method_dict, call_function_name, call_tuple_types)
                     end
 
                     continue
@@ -479,6 +489,16 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                         call_counter = call_counter + 1
                     end    
                     
+                    #Detect Core.Compiler.Const(.......) and replace with just Core.Compiler.Const
+                    call_type_counter = 1
+                    for call_type in call_vec_types
+                        call_type_convert_to_string = String(Symbol(call_type))
+                        if(startswith(call_type_convert_to_string, "Core.Compiler.Const"))
+                            call_vec_types[call_type_counter] = eval(Core.Compiler.Const)
+                        end
+                        call_type_counter += 1
+                    end
+                    
                     #Final tuple of arguments
                     call_tuple_types = tuple(call_vec_types...)
 
@@ -503,7 +523,7 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                         
                         #If finding a TypeError exception, remove the function entirely
                         if(typeof(exception) == TypeError)
-                            #remove_from_method_dict(method_dict, call_function_name, call_tuple_types)
+                            remove_from_method_dict(method_dict, call_function_name, call_tuple_types)
                         end
 
                         continue

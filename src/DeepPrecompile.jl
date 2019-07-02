@@ -1,8 +1,6 @@
 module DeepPrecompile
 
-using Crayons
-
-using InteractiveUtils
+using Crayons, InteractiveUtils
 
 export @deep_precompile, @deep_precompile_list, deep_precompile, deep_precompile_list
 
@@ -131,7 +129,8 @@ function add_to_method_dict(method_dict, f, types_tuple)::Bool
     
     tuple_fun_and_types = (f, types_tuple)
     
-    try
+    #Check if key is already in the dict or if it is not found. Catch, and set the new one.
+    try 
         getindex(method_dict, tuple_fun_and_types)
         #println(Crayon(foreground = :red), "WARNING: ", Crayon(foreground = :white), "Function $f$(types_tuple) is already in the method dictionary")
     catch
@@ -394,7 +393,10 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
 
                 method_instance_full_name = retrieve_function_name(method_instance_full_name, f, types_tuple, code_info_typed, code_line_by_line)
 
-                #Should I eval method_instance_full_name here, linke in :call and :new?
+                #Returned function name should never be an AST representation... This needs review, as it shouldn't return any of these from retrieve_function_name... Test it with Gadfly's plot function, it would crash!!!
+                if(isa(method_instance_full_name, Core.PhiNode) || isa(method_instance_full_name, Core.PhiCNode) || isa(method_instance_full_name, Core.PiNode))
+                    continue
+                end
 
                 #If it is a Core.IntrinsicFunction or a Core.Builtin function, it's already compiled and no need to do anything with it.
                 if(isa(method_instance_full_name, Core.IntrinsicFunction) || isa(method_instance_full_name, Core.Builtin))
@@ -403,6 +405,16 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                 
                 method_instance_args = method_instance.specTypes.parameters[2:end] #Ignore first one, which is the function name
                 #println(method_instance_args)
+
+                #Detect Core.Compiler.Const(.......) and replace with just Core.Compiler.Const
+                method_instance_type_counter = 1
+                for method_instance_type in method_instance_args
+                    method_instance_type_convert_to_string = String(Symbol(method_instance_type))
+                    if(startswith(method_instance_type_convert_to_string, "Core.Compiler.Const"))
+                        method_instance_args[method_instance_type_counter] = eval(Core.Compiler.Const)
+                    end
+                    method_instance_type_counter += 1
+                end
 
                 method_instance_args_tuple = tuple(method_instance_args...) #svec -> Tuple
                 #println(method_instance_args_tuple)
@@ -441,6 +453,12 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
 
                 call_function_name = retrieve_function_name(call_function_name, f, types_tuple, code_info_typed, code_line_by_line)
 
+                #Returned function name should never be an AST representation... This needs review, as it shouldn't return any of these from retrieve_function_name... Test it with Gadfly's plot function, it would crash!!!
+                if(isa(call_function_name, Core.PhiNode) || isa(call_function_name, Core.PhiCNode) || isa(call_function_name, Core.PiNode))
+                    #println(code_info_typed)
+                    continue
+                end
+
                 #Evaluate to get correct full naming. (E.g. "Core.Expr" instead of just "Expr")
                 eval_call_function_name = eval(:($call_function_name))
 
@@ -478,6 +496,16 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                         call_vec_types[call_counter] = code_ssavaluetypes[num]
                         call_counter = call_counter + 1
                     end    
+                    
+                    #Detect Core.Compiler.Const(.......) and replace with just Core.Compiler.Const
+                    call_type_counter = 1
+                    for call_type in call_vec_types
+                        call_type_convert_to_string = String(Symbol(call_type))
+                        if(startswith(call_type_convert_to_string, "Core.Compiler.Const"))
+                            call_vec_types[call_type_counter] = eval(Core.Compiler.Const)
+                        end
+                        call_type_counter += 1
+                    end
                     
                     #Final tuple of arguments
                     call_tuple_types = tuple(call_vec_types...)
@@ -518,6 +546,11 @@ function find_compilable_methods_recursive(f, types_tuple, method_dict)
                 
                 #To be honest, constructor_type_name could only be a Core.SSAValue or an Expr. Nevertheless, run the same function.
                 constructor_type_name = retrieve_function_name(constructor_type_name, f, types_tuple, code_info_typed, code_line_by_line)
+
+                #Returned function name should never be an AST representation... This needs review, as it shouldn't return any of these from retrieve_function_name... Test it with Gadfly's plot function, it would crash!!!
+                if(isa(constructor_type_name, Core.PhiNode) || isa(constructor_type_name, Core.PhiCNode) || isa(constructor_type_name, Core.PiNode))
+                    continue
+                end
                 
                 #Evaluate to get correct full naming. (E.g. "Core.Expr" instead of just "Expr")
                 constructor_type_name = eval(:($(constructor_type_name)))
